@@ -63,19 +63,20 @@ func vlog(format string, args ...any) {
 }
 
 type stream struct {
-	mu    sync.Mutex
-	seen  map[string]struct{}
-	n     int
-	limit int
-	first string
-	last  string
-	queue chan string
-	done  chan struct{}
+	mu     sync.Mutex
+	seen   map[string]struct{}
+	n      int
+	limit  int
+	first  string
+	last   string
+	lastID string
+	queue  chan string
+	done   chan struct{}
 }
 
 func newStream(limit int) *stream {
 	s := &stream{
-		seen:  make(map[string]struct{}, 64),
+		seen:  make(map[string]struct{}, 256),
 		limit: limit,
 		queue: make(chan string, 256),
 		done:  make(chan struct{}),
@@ -121,10 +122,20 @@ func (s *stream) add(u string) bool {
 		s.first = u
 	}
 	s.last = u
+	if i := strings.LastIndex(u, "/video/"); i >= 0 {
+		s.lastID = u[i+len("/video/"):]
+	}
 	okMore := s.limit <= 0 || s.n < s.limit
 	s.mu.Unlock()
 	s.queue <- u
 	return okMore
+}
+
+func (s *stream) lastVideoID() string {
+	s.mu.Lock()
+	id := s.lastID
+	s.mu.Unlock()
+	return id
 }
 
 func (s *stream) finish() {
@@ -240,9 +251,10 @@ type savedSession struct {
 }
 
 type diskSessionCache struct {
-	mu   sync.Mutex
-	mem  map[string]*tls.ClientSessionState
-	path string
+	mu             sync.Mutex
+	mem            map[string]*tls.ClientSessionState
+	path           string
+	flushScheduled bool
 }
 
 func loadSessionCache() *diskSessionCache {
@@ -290,21 +302,30 @@ func (c *diskSessionCache) Put(sessionKey string, cs *tls.ClientSessionState) {
 	} else {
 		c.mem[sessionKey] = cs
 	}
-	stored := make(map[string]savedSession, len(c.mem))
-	for k, st := range c.mem {
-		ticket, state, err := st.ResumptionState()
-		if err != nil || state == nil {
-			continue
-		}
-		b, err := state.Bytes()
-		if err != nil {
-			continue
-		}
-		stored[k] = savedSession{Ticket: ticket, State: b}
+	if c.flushScheduled {
+		c.mu.Unlock()
+		return
 	}
-	path := c.path
+	c.flushScheduled = true
 	c.mu.Unlock()
 	go func() {
+		time.Sleep(200 * time.Millisecond)
+		c.mu.Lock()
+		c.flushScheduled = false
+		stored := make(map[string]savedSession, len(c.mem))
+		for k, st := range c.mem {
+			ticket, state, err := st.ResumptionState()
+			if err != nil || state == nil {
+				continue
+			}
+			b, err := state.Bytes()
+			if err != nil {
+				continue
+			}
+			stored[k] = savedSession{Ticket: ticket, State: b}
+		}
+		path := c.path
+		c.mu.Unlock()
 		_ = os.MkdirAll(filepath.Dir(path), 0o755)
 		raw, err := json.Marshal(stored)
 		if err != nil {
@@ -316,7 +337,7 @@ func (c *diskSessionCache) Put(sessionKey string, cs *tls.ClientSessionState) {
 
 func newFastClient() *http.Client {
 	dialer := &net.Dialer{
-		Timeout:   4 * time.Second,
+		Timeout:   8 * time.Second,
 		KeepAlive: 30 * time.Second,
 	}
 	return &http.Client{
@@ -334,6 +355,8 @@ func newFastClient() *http.Client {
 			TLSHandshakeTimeout:   5 * time.Second,
 			ResponseHeaderTimeout: 10 * time.Second,
 			ExpectContinueTimeout: 0,
+			WriteBufferSize:       64 << 10,
+			ReadBufferSize:        64 << 10,
 			TLSClientConfig: &tls.Config{
 				MinVersion:         tls.VersionTLS13,
 				CurvePreferences:   []tls.CurveID{tls.X25519},
@@ -616,7 +639,14 @@ func fetchItemList(secUID, username string, cursor int64, s *stream) (int, error
 
 	runJob := func(c int64) {
 		items, hasMore, err := cache.get(ctx, secUID, c, store, client)
-		if err != nil || len(items) == 0 || !hasMore {
+		if err != nil {
+			queued.Delete(c)
+			if ctx.Err() == nil {
+				vlog("worker cursor=%d err=%v", c, err)
+			}
+			return
+		}
+		if len(items) == 0 || !hasMore {
 			return
 		}
 		enqueue(items[len(items)-1].CreateTime*1000, true)
@@ -699,15 +729,30 @@ func fetchItemList(secUID, username string, cursor int64, s *stream) (int, error
 	}
 	enqueue(lastCreate*1000, true)
 
+	emitOverlap := func(rest []ttItem, more bool) bool {
+		before = s.n
+		lastCreate = emitItems(rest)
+		vlog("worker hit +%d total=%d", s.n-before, s.n)
+		if !more || lastCreate == 0 || !s.more() {
+			return false
+		}
+		enqueue(lastCreate*1000, true)
+		return true
+	}
+
+	type pageGot struct {
+		items []ttItem
+		more  bool
+		err   error
+	}
+	poll := time.NewTicker(2 * time.Millisecond)
+	defer poll.Stop()
+
 	for s.more() && lastCreate != 0 {
-		if rest, found, more := store.takeFrom(videoIDFromURL(s.last)); found && len(rest) > 0 {
-			before = s.n
-			lastCreate = emitItems(rest)
-			vlog("worker hit +%d total=%d", s.n-before, s.n)
-			if !more || lastCreate == 0 || !s.more() {
+		if rest, found, more := store.takeFrom(s.lastVideoID()); found && len(rest) > 0 {
+			if !emitOverlap(rest, more) {
 				break
 			}
-			enqueue(lastCreate*1000, true)
 			continue
 		}
 
@@ -715,28 +760,59 @@ func fetchItemList(secUID, username string, cursor int64, s *stream) (int, error
 		if next == cursor {
 			break
 		}
-		cursor = next
+
+		got := make(chan pageGot, 1)
 		t0 = time.Now()
-		items, hasMore, err = cache.get(ctx, secUID, cursor, store, client)
+		go func(cur int64) {
+			it, hm, err := cache.get(ctx, secUID, cur, store, client)
+			got <- pageGot{it, hm, err}
+		}(next)
+
+		var g pageGot
+		fromCache := false
+		for {
+			if rest, found, more := store.takeFrom(s.lastVideoID()); found && len(rest) > 0 {
+				if !emitOverlap(rest, more) {
+					lastCreate = 0
+				}
+				break
+			}
+			select {
+			case g = <-got:
+				fromCache = true
+			case <-poll.C:
+				continue
+			case <-ctx.Done():
+				lastCreate = 0
+			}
+			break
+		}
+		if !fromCache {
+			continue
+		}
+
+		cursor = next
 		pages++
-		if err != nil {
+		if g.err != nil {
 			if s.n > 0 {
 				break
 			}
 			cancel()
 			wg.Wait()
-			return pages, err
+			return pages, g.err
 		}
-		if len(items) == 0 {
+		if len(g.items) == 0 {
 			vlog("page %d %s empty", pages, time.Since(t0).Round(time.Millisecond))
 			break
 		}
 		before = s.n
-		lastCreate = emitItems(items)
-		vlog("page %d %s +%d total=%d hasMore=%t n=%d", pages, time.Since(t0).Round(time.Millisecond), s.n-before, s.n, hasMore, len(items))
+		lastCreate = emitItems(g.items)
+		hasMore = g.more
+		vlog("page %d %s +%d total=%d hasMore=%t n=%d", pages, time.Since(t0).Round(time.Millisecond), s.n-before, s.n, hasMore, len(g.items))
 		if !hasMore {
 			break
 		}
+		enqueue(lastCreate*1000, true)
 	}
 
 	cancel()
@@ -867,6 +943,7 @@ type itemBlock struct {
 type blockStore struct {
 	mu     sync.Mutex
 	blocks []itemBlock
+	byID   map[string]int
 }
 
 func (b *blockStore) put(items []ttItem, more bool) {
@@ -874,7 +951,14 @@ func (b *blockStore) put(items []ttItem, more bool) {
 		return
 	}
 	b.mu.Lock()
+	if b.byID == nil {
+		b.byID = make(map[string]int, 128)
+	}
+	idx := len(b.blocks)
 	b.blocks = append(b.blocks, itemBlock{items: items, more: more})
+	for _, it := range items {
+		b.byID[it.ID] = idx
+	}
 	b.mu.Unlock()
 }
 
@@ -884,27 +968,41 @@ func (b *blockStore) takeFrom(id string) (rest []ttItem, found bool, more bool) 
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	for i, blk := range b.blocks {
-		for j, it := range blk.items {
-			if it.ID != id {
-				continue
-			}
-			rest = append([]ttItem(nil), blk.items[j+1:]...)
-			b.blocks = append(b.blocks[:i], b.blocks[i+1:]...)
-			return rest, true, blk.more
+	idx, ok := b.byID[id]
+	if !ok || idx < 0 || idx >= len(b.blocks) {
+		return nil, false, true
+	}
+	blk := b.blocks[idx]
+	for j, it := range blk.items {
+		if it.ID != id {
+			continue
 		}
+		rest = append([]ttItem(nil), blk.items[j+1:]...)
+		for _, x := range blk.items {
+			delete(b.byID, x.ID)
+		}
+		last := len(b.blocks) - 1
+		if idx != last {
+			b.blocks[idx] = b.blocks[last]
+			for _, x := range b.blocks[idx].items {
+				b.byID[x.ID] = idx
+			}
+		}
+		b.blocks = b.blocks[:last]
+		return rest, true, blk.more
 	}
 	return nil, false, true
 }
 
 func fetchItemListPage(ctx context.Context, secUID string, cursor int64, c *http.Client) (*itemListResp, error) {
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-	u := fmt.Sprintf(
-		"https://www.tiktok.com/api/creator/item_list/?aid=1988&count=15&cursor=%d&secUid=%s&type=1",
-		cursor, secUID,
-	)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	var b strings.Builder
+	b.Grow(160 + len(secUID))
+	b.WriteString("https://www.tiktok.com/api/creator/item_list/?aid=1988&count=15&cursor=")
+	b.WriteString(strconv.FormatInt(cursor, 10))
+	b.WriteString("&secUid=")
+	b.WriteString(secUID)
+	b.WriteString("&type=1")
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, b.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -914,17 +1012,15 @@ func fetchItemListPage(ctx context.Context, secUID string, cursor int64, c *http
 		return nil, err
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if err != nil {
-		return nil, err
-	}
 	if resp.StatusCode != http.StatusOK {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
 		return nil, fmt.Errorf("item_list HTTP %d", resp.StatusCode)
 	}
 	var page itemListResp
-	if err := json.Unmarshal(body, &page); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&page); err != nil {
 		return nil, err
 	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
 	if page.StatusCode != 0 {
 		return nil, fmt.Errorf("item_list status %d", page.StatusCode)
 	}
