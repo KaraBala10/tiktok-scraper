@@ -6,13 +6,11 @@
     No browser. Stdlib only. Prints each URL as soon as it arrives.
   </p>
   <p>
-    <a href="https://go.dev/doc/go1.23"><img src="https://img.shields.io/badge/Go-1.23+-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Go 1.23+" /></a>
-    <a href="https://go.dev/dl/"><img src="https://img.shields.io/badge/toolchain-go.dev%2Fdl-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Go downloads" /></a>
+    <a href="https://github.com/KaraBala10/tiktok-scraper/releases/latest"><img src="https://img.shields.io/github/v/release/KaraBala10/tiktok-scraper?style=for-the-badge&logo=github&label=latest%20release" alt="Latest release" /></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-a3e635?style=for-the-badge&logo=opensourceinitiative&logoColor=white" alt="MIT License" /></a>
     <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/changelog-Keep%20a%20Changelog-E05735?style=for-the-badge&logo=keepachangelog&logoColor=white" alt="Changelog" /></a>
     <a href="https://semver.org/spec/v2.0.0.html"><img src="https://img.shields.io/badge/versioning-SemVer-3F9FD7?style=for-the-badge&logo=semver&logoColor=white" alt="Semantic Versioning" /></a>
-    <a href="go.mod"><img src="https://img.shields.io/badge/dependencies-stdlib-111827?style=for-the-badge&logo=go&logoColor=00ADD8" alt="Standard library only" /></a>
-    <img src="https://img.shields.io/badge/platform-linux%20%7C%20macOS%20%7C%20Windows-111827?style=for-the-badge&logo=gnubash&logoColor=white" alt="linux, macOS, Windows" />
+    <img src="https://img.shields.io/badge/platform-Linux%20x86__64-111827?style=for-the-badge&logo=linux&logoColor=white" alt="Linux x86_64" />
   </p>
 </div>
 
@@ -28,30 +26,23 @@
 - [Versions](#versions)
 - [Limits](#limits)
 - [License](#license)
+- [Build from source](#build-from-source)
 
 ## Install
 
-Requires [**Go 1.23+**](https://go.dev/doc/go1.23). Install a toolchain from [go.dev/dl](https://go.dev/dl/).
+Download a ready binary from the latest GitHub Release. You do not need Go, and you do not need to clone this repository.
+
+**[Latest release](https://github.com/KaraBala10/tiktok-scraper/releases/latest)** (always the current version)
+
+On that page, under **Assets**, download the archive for your OS. Releases currently ship Linux x86_64. No extra libraries or language runtimes are required. A network connection is required so the tool can talk to TikTok.
 
 ```bash
-git clone https://github.com/KaraBala10/tiktok-scraper.git
-cd tiktok-scraper
-go build -o tiktok_scraper .
+tar -xzf tiktok-scraper-*-linux-amd64.tar.gz
+chmod +x tiktok_scraper-linux-amd64
+./tiktok_scraper-linux-amd64 @username
 ```
 
-From the current directory if you already have the source:
-
-```bash
-go build -o tiktok_scraper .
-```
-
-The binary uses the [Go standard library](https://pkg.go.dev/std) only. No `go get` of third-party modules.
-
-| Toolchain | Docs |
-| --- | --- |
-| Go 1.23 language notes | [go.dev/doc/go1.23](https://go.dev/doc/go1.23) |
-| Go 1.23.0 tag | [github.com/golang/go/releases/tag/go1.23.0](https://github.com/golang/go/releases/tag/go1.23.0) |
-| Module file | [`go.mod`](go.mod) (`go 1.23`) |
+The exact filename changes with each version. Use the file listed on the [latest release](https://github.com/KaraBala10/tiktok-scraper/releases/latest) page.
 
 ## Usage
 
@@ -123,20 +114,10 @@ This project follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.
 
 | Resource | Link |
 | --- | --- |
+| Latest release | [releases/latest](https://github.com/KaraBala10/tiktok-scraper/releases/latest) |
+| All releases | [releases](https://github.com/KaraBala10/tiktok-scraper/releases) |
 | Changelog | [CHANGELOG.md](CHANGELOG.md) |
 | License | [LICENSE](LICENSE) (MIT, 2026) |
-| Go language version | [1.23 release notes](https://go.dev/doc/go1.23) |
-| Go toolchains | [go.dev/dl](https://go.dev/dl/) |
-| GitHub Releases | [KaraBala10/tiktok-scraper/releases](https://github.com/KaraBala10/tiktok-scraper/releases) |
-
-Tag a release after the GitHub repo exists:
-
-```bash
-git tag -a v0.1.0 -m "v0.1.0"
-git push origin v0.1.0
-```
-
-The next published tag becomes the GitHub Release that the version badge tracks.
 
 ## Limits
 
@@ -148,3 +129,15 @@ The next published tag becomes the GitHub Release that the version badge tracks.
 ## License
 
 [MIT](LICENSE) © 2026 [KaraBala](https://github.com/KaraBala10)
+
+## Build from source
+
+Only needed if you are changing the code. Users should install from the [latest release](https://github.com/KaraBala10/tiktok-scraper/releases/latest).
+
+Requires [Go 1.23+](https://go.dev/doc/go1.23). No third-party modules.
+
+```bash
+git clone https://github.com/KaraBala10/tiktok-scraper.git
+cd tiktok-scraper
+go build -o tiktok_scraper .
+```
