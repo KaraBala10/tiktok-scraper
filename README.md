@@ -10,7 +10,7 @@
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-a3e635?style=for-the-badge&logo=opensourceinitiative&logoColor=white" alt="MIT License" /></a>
     <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/changelog-Keep%20a%20Changelog-E05735?style=for-the-badge&logo=keepachangelog&logoColor=white" alt="Changelog" /></a>
     <a href="https://semver.org/spec/v2.0.0.html"><img src="https://img.shields.io/badge/versioning-SemVer-3F9FD7?style=for-the-badge&logo=semver&logoColor=white" alt="Semantic Versioning" /></a>
-    <img src="https://img.shields.io/badge/platform-Linux%20x86__64-111827?style=for-the-badge&logo=linux&logoColor=white" alt="Linux x86_64" />
+    <img src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows-111827?style=for-the-badge&logo=windows&logoColor=white" alt="Linux and Windows" />
   </p>
 </div>
 
@@ -34,12 +34,21 @@ Download a ready binary from the latest GitHub Release. You do not need Go, and 
 
 **[Latest release](https://github.com/KaraBala10/tiktok-scraper/releases/latest)** (always the current version)
 
-On that page, under **Assets**, download the archive for your OS. Releases currently ship Linux x86_64. No extra libraries or language runtimes are required. A network connection is required so the tool can talk to TikTok.
+On that page, under **Assets**, download the archive for your OS (Linux x86_64 or Windows x86_64). No extra libraries or language runtimes are required. A network connection is required so the tool can talk to TikTok.
+
+Linux:
 
 ```bash
 tar -xzf tiktok-scraper-*-linux-amd64.tar.gz
 chmod +x tiktok_scraper-linux-amd64
 ./tiktok_scraper-linux-amd64 @username
+```
+
+Windows (PowerShell or Command Prompt):
+
+```bat
+tar -xf tiktok-scraper-windows-amd64.zip
+tiktok_scraper.exe @username
 ```
 
 The exact filename changes with each version. Use the file listed on the [latest release](https://github.com/KaraBala10/tiktok-scraper/releases/latest) page.
