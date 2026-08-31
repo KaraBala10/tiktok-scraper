@@ -34,7 +34,7 @@
 Requires [**Go 1.23+**](https://go.dev/doc/go1.23). Install a toolchain from [go.dev/dl](https://go.dev/dl/).
 
 ```bash
-git clone https://github.com/KaraBala/tiktok-scraper.git
+git clone https://github.com/KaraBala10/tiktok-scraper.git
 cd tiktok-scraper
 go build -o tiktok_scraper .
 ```
@@ -127,7 +127,7 @@ This project follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.
 | License | [LICENSE](LICENSE) (MIT, 2026) |
 | Go language version | [1.23 release notes](https://go.dev/doc/go1.23) |
 | Go toolchains | [go.dev/dl](https://go.dev/dl/) |
-| GitHub Releases | [KaraBala/tiktok-scraper/releases](https://github.com/KaraBala/tiktok-scraper/releases) |
+| GitHub Releases | [KaraBala10/tiktok-scraper/releases](https://github.com/KaraBala10/tiktok-scraper/releases) |
 
 Tag a release after the GitHub repo exists:
 
@@ -147,4 +147,4 @@ The next published tag becomes the GitHub Release that the version badge tracks.
 
 ## License
 
-[MIT](LICENSE) © 2026 [KaraBala](https://github.com/KaraBala)
+[MIT](LICENSE) © 2026 [KaraBala](https://github.com/KaraBala10)
