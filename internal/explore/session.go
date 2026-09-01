@@ -29,25 +29,11 @@ func defaultCookieFile() string {
 }
 
 func detectIPRegion() string {
-	if r := regionFromTrace("https://www.cloudflare.com/cdn-cgi/trace"); r != "" {
-		return r
-	}
 	if r := regionFromIPAPI(); r != "" {
 		return r
 	}
-	return ""
-}
-
-func regionFromTrace(rawURL string) string {
-	body, err := httpGet(rawURL, 4*time.Second)
-	if err != nil {
-		return ""
-	}
-	for _, line := range strings.Split(string(body), "\n") {
-		k, v, ok := strings.Cut(strings.TrimSpace(line), "=")
-		if ok && k == "loc" {
-			return normalizeRegion(v)
-		}
+	if r := regionFromIPWho(); r != "" {
+		return r
 	}
 	return ""
 }
@@ -62,6 +48,21 @@ func regionFromIPAPI() string {
 		CountryCode string `json:"countryCode"`
 	}
 	if json.Unmarshal(body, &out) != nil || out.Status != "success" {
+		return ""
+	}
+	return normalizeRegion(out.CountryCode)
+}
+
+func regionFromIPWho() string {
+	body, err := httpGet("https://ipwho.is/?fields=success,country_code", 4*time.Second)
+	if err != nil {
+		return ""
+	}
+	var out struct {
+		Success     bool   `json:"success"`
+		CountryCode string `json:"country_code"`
+	}
+	if json.Unmarshal(body, &out) != nil || !out.Success {
 		return ""
 	}
 	return normalizeRegion(out.CountryCode)

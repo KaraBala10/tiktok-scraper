@@ -11,7 +11,8 @@ and version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Fixed
 
-- Explore session region now follows the current IP (e.g. `AR`) instead of printing `?` on mint and then saving the `-region` default (`KW`)
+- Explore session region now follows the current IP instead of printing `?` on mint and then saving the `-region` default (`KW`)
+- Look up the IP country with ip-api; Cloudflare `loc` mislabels some VPN exits (e.g. Kuwait as `FR`)
 
 ## [0.3.0] - 2026-09-01
 
