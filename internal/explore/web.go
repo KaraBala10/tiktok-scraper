@@ -120,6 +120,9 @@ func parseWeb(body []byte, cat int, p regionProfile) ([]video, string, error) {
 }
 
 func webTokenDead(body []byte, err error) bool {
+	if isGeoBlocked(err) {
+		return false
+	}
 	if err != nil {
 		return true
 	}

@@ -145,21 +145,29 @@ func Run(args []string) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	if !minted {
-		applyIPRegion()
-	}
 
 	body, err := fetchWebComedy(cat, *c.count, prof, sess)
+	if isGeoBlocked(err) {
+		fmt.Fprintln(os.Stderr, "tiktok blocked this IP (HTTP 451). a saved msToken cannot bypass a country ban; use a VPN")
+		os.Exit(1)
+	}
 	if webTokenDead(body, err) && !minted {
 		fmt.Fprintln(os.Stderr, "web token expired; minting...")
 		if merr := doMint(); merr != nil {
-			fmt.Fprintln(os.Stderr, merr)
-			os.Exit(1)
+			if isGeoBlocked(merr) && sess.Cookie != "" {
+				fmt.Fprintln(os.Stderr, "mint blocked (HTTP 451); keeping saved session")
+			} else {
+				fmt.Fprintln(os.Stderr, merr)
+				os.Exit(1)
+			}
+		} else {
+			body, err = fetchWebComedy(cat, *c.count, prof, sess)
 		}
-		body, err = fetchWebComedy(cat, *c.count, prof, sess)
 	}
 	if err != nil || webTokenDead(body, err) {
-		if err != nil {
+		if isGeoBlocked(err) {
+			fmt.Fprintln(os.Stderr, "tiktok blocked this IP (HTTP 451). a saved msToken cannot bypass a country ban; use a VPN")
+		} else if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		} else {
 			fmt.Fprintln(os.Stderr, "empty web comedy response")
@@ -174,6 +182,9 @@ func Run(args []string) {
 
 	next := func() ([]byte, error) {
 		b, err := fetchWebComedy(cat, *c.count, prof, sess)
+		if isGeoBlocked(err) {
+			return nil, fmt.Errorf("tiktok blocked this IP (HTTP 451); use a VPN")
+		}
 		if !webTokenDead(b, err) {
 			return b, err
 		}
@@ -182,6 +193,9 @@ func Run(args []string) {
 		}
 		fmt.Fprintln(os.Stderr, "web token expired; minting...")
 		if merr := doMint(); merr != nil {
+			if isGeoBlocked(merr) && sess.Cookie != "" {
+				return b, fmt.Errorf("mint blocked (HTTP 451); keeping saved session")
+			}
 			return nil, merr
 		}
 		return fetchWebComedy(cat, *c.count, prof, sess)

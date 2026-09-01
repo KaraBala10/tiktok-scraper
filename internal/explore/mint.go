@@ -3,6 +3,7 @@ package explore
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -17,6 +18,12 @@ import (
 	tls_client "github.com/bogdanfinn/tls-client"
 	"github.com/bogdanfinn/tls-client/profiles"
 )
+
+var errGeoBlocked = errors.New("tiktok geo-blocked (HTTP 451)")
+
+func isGeoBlocked(err error) bool {
+	return err != nil && (errors.Is(err, errGeoBlocked) || strings.Contains(err.Error(), "HTTP 451"))
+}
 
 var universalDataRE = regexp.MustCompile(`<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>(.*?)</script>`)
 
@@ -171,6 +178,9 @@ func tlsDo(client tls_client.HttpClient, raw, accept, cookie string, cookies map
 		}
 	}
 	token := strings.TrimSpace(resp.Header.Get("x-ms-token"))
+	if resp.StatusCode == 451 {
+		return rawBody, token, errGeoBlocked
+	}
 	if resp.StatusCode != 200 {
 		return rawBody, token, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
