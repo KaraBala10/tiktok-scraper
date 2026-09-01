@@ -102,12 +102,13 @@ func mintSession(parent context.Context) (*pinnedSession, error) {
 	if !strings.Contains(ck, "msToken=") {
 		return nil, fmt.Errorf("mint: no msToken in cookies")
 	}
+	region := firstNonEmpty(normalizeRegion(cookies["store-country-code"]), normalizeRegion(ids.Region))
 	return &pinnedSession{
 		Cookie:        ck,
 		DeviceID:      ids.DeviceID,
 		OdinID:        ids.OdinID,
 		WebIDLastTime: ids.WebIDLastTime,
-		Region:        strings.ToUpper(firstNonEmpty(cookies["store-country-code"], ids.Region)),
+		Region:        region,
 		CSRF:          cookies["tt_csrf_token"],
 		CapturedAt:    time.Now().UTC().Format(time.RFC3339),
 	}, nil
@@ -156,6 +157,16 @@ func tlsDo(client tls_client.HttpClient, raw, accept, cookie string, cookies map
 		for _, c := range resp.Cookies() {
 			if c.Name != "" && c.Value != "" {
 				cookies[c.Name] = c.Value
+			}
+		}
+		for _, line := range resp.Header.Values("Set-Cookie") {
+			nv, _, _ := strings.Cut(line, ";")
+			k, v, ok := strings.Cut(nv, "=")
+			if ok {
+				k, v = strings.TrimSpace(k), strings.TrimSpace(v)
+				if k != "" && v != "" {
+					cookies[k] = v
+				}
 			}
 		}
 	}

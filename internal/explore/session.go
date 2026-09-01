@@ -1,11 +1,15 @@
 package explore
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 func cacheDir() string {
@@ -22,6 +26,76 @@ func defaultSessionPath() string {
 
 func defaultCookieFile() string {
 	return filepath.Join(cacheDir(), "cookies.txt")
+}
+
+func detectIPRegion() string {
+	if r := regionFromTrace("https://www.cloudflare.com/cdn-cgi/trace"); r != "" {
+		return r
+	}
+	if r := regionFromIPAPI(); r != "" {
+		return r
+	}
+	return ""
+}
+
+func regionFromTrace(rawURL string) string {
+	body, err := httpGet(rawURL, 4*time.Second)
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(body), "\n") {
+		k, v, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if ok && k == "loc" {
+			return normalizeRegion(v)
+		}
+	}
+	return ""
+}
+
+func regionFromIPAPI() string {
+	body, err := httpGet("http://ip-api.com/json/?fields=status,countryCode", 4*time.Second)
+	if err != nil {
+		return ""
+	}
+	var out struct {
+		Status      string `json:"status"`
+		CountryCode string `json:"countryCode"`
+	}
+	if json.Unmarshal(body, &out) != nil || out.Status != "success" {
+		return ""
+	}
+	return normalizeRegion(out.CountryCode)
+}
+
+func httpGet(rawURL string, timeout time.Duration) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+}
+
+func normalizeRegion(s string) string {
+	s = strings.ToUpper(strings.TrimSpace(s))
+	if len(s) != 2 {
+		return ""
+	}
+	for _, c := range s {
+		if c < 'A' || c > 'Z' {
+			return ""
+		}
+	}
+	return s
 }
 
 func loadCookieHeader(path string) (string, error) {

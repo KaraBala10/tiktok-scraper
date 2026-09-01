@@ -82,9 +82,6 @@ func fetchWebComedy(categoryType, count int, p regionProfile, sess *pinnedSessio
 		}
 	}
 	if !webTokenDead(body, nil) {
-		if sess.Region == "" {
-			sess.Region = p.Code
-		}
 		sess.CapturedAt = time.Now().UTC().Format(time.RFC3339)
 	}
 	return body, nil

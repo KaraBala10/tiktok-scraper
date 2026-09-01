@@ -96,7 +96,7 @@ func Run(args []string) {
 			sess = old
 			saveSession(sessPath, sess)
 		} else {
-			sess = &pinnedSession{Region: prof.Code}
+			sess = &pinnedSession{}
 		}
 	}
 	if v := strings.TrimSpace(*c.deviceID); v != "" {
@@ -111,6 +111,11 @@ func Run(args []string) {
 
 	savePin := true
 	minted := false
+	applyIPRegion := func() {
+		if r := detectIPRegion(); r != "" {
+			sess.Region = r
+		}
+	}
 	doMint := func() error {
 		s, err := mintSession(ctx)
 		if err != nil {
@@ -120,6 +125,7 @@ func Run(args []string) {
 		if v := strings.TrimSpace(*c.deviceID); v != "" {
 			sess.DeviceID = v
 		}
+		applyIPRegion()
 		saveSession(sessPath, sess)
 		minted = true
 		fmt.Fprintf(os.Stderr, "minted web session region=%s -> %s\n", orDash(sess.Region), sessPath)
@@ -139,6 +145,9 @@ func Run(args []string) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+	if !minted {
+		applyIPRegion()
+	}
 
 	body, err := fetchWebComedy(cat, *c.count, prof, sess)
 	if webTokenDead(body, err) && !minted {
@@ -156,9 +165,6 @@ func Run(args []string) {
 			fmt.Fprintln(os.Stderr, "empty web comedy response")
 		}
 		os.Exit(1)
-	}
-	if sess.Region == "" {
-		sess.Region = prof.Code
 	}
 	sess.CapturedAt = time.Now().UTC().Format(time.RFC3339)
 	saveSession(sessPath, sess)
