@@ -11,7 +11,7 @@ import (
 
 const exploreStall = 20 * time.Second
 
-func stream(ctx context.Context, first []byte, next func(cursor string, fresh bool) ([]byte, error), parse func([]byte) ([]video, string, error), dump bool, limit int, sessPath string, sess *pinnedSession, savePin *bool) int {
+func stream(ctx context.Context, first []byte, next func(cursor string, fresh bool) ([]byte, error), parse func([]byte) ([]video, string, error), dump bool, limit int, sessPath string, sess *pinnedSession) int {
 	out := bufio.NewWriterSize(os.Stdout, 64<<10)
 	defer out.Flush()
 	seen := make(map[string]struct{}, 256)
@@ -95,9 +95,7 @@ func stream(ctx context.Context, first []byte, next func(cursor string, fresh bo
 				}
 			}
 		}
-		if savePin != nil && *savePin {
-			saveSession(sessPath, sess)
-		}
+		saveSession(sessPath, sess)
 		if !fresh {
 			if c := pageCursor(body); c != "" {
 				cursor = c

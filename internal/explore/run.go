@@ -64,6 +64,8 @@ func stripModeFlags(args []string) []string {
 	return out
 }
 
+const geoBlockedMsg = "tiktok blocked this IP (HTTP 451). a saved msToken cannot bypass a country ban; use a VPN"
+
 func Run(args []string) {
 	fs := flag.NewFlagSet("explore", flag.ExitOnError)
 	c := bindFlags(fs)
@@ -92,12 +94,7 @@ func Run(args []string) {
 	sessPath := defaultSessionPath()
 	sess := loadSession(sessPath)
 	if sess == nil {
-		if old := loadSession("session.json"); old != nil {
-			sess = old
-			saveSession(sessPath, sess)
-		} else {
-			sess = &pinnedSession{}
-		}
+		sess = &pinnedSession{}
 	}
 	if v := strings.TrimSpace(*c.deviceID); v != "" {
 		sess.DeviceID = v
@@ -109,7 +106,6 @@ func Run(args []string) {
 		sess.Cookie = ck
 	}
 
-	savePin := true
 	minted := false
 	var lastMint time.Time
 	applyIPRegion := func() {
@@ -118,7 +114,7 @@ func Run(args []string) {
 		}
 	}
 	doMint := func() error {
-		s, err := mintSession(ctx)
+		s, err := mintSession()
 		if err != nil {
 			return err
 		}
@@ -150,7 +146,7 @@ func Run(args []string) {
 
 	body, err := fetchWebComedy(cat, *c.count, prof, sess, "", false)
 	if isGeoBlocked(err) {
-		fmt.Fprintln(os.Stderr, "tiktok blocked this IP (HTTP 451). a saved msToken cannot bypass a country ban; use a VPN")
+		fmt.Fprintln(os.Stderr, geoBlockedMsg)
 		os.Exit(1)
 	}
 	if (webTokenDead(body, err) || webEmpty(body)) && !minted {
@@ -168,7 +164,7 @@ func Run(args []string) {
 	}
 	if err != nil || webTokenDead(body, err) || webEmpty(body) {
 		if isGeoBlocked(err) {
-			fmt.Fprintln(os.Stderr, "tiktok blocked this IP (HTTP 451). a saved msToken cannot bypass a country ban; use a VPN")
+			fmt.Fprintln(os.Stderr, geoBlockedMsg)
 		} else if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		} else {
@@ -198,7 +194,7 @@ func Run(args []string) {
 		}
 		b, err := fetchWebComedy(cat, *c.count, prof, sess, cursor, fresh)
 		if isGeoBlocked(err) {
-			return nil, fmt.Errorf("tiktok blocked this IP (HTTP 451); use a VPN")
+			return nil, fmt.Errorf("%s", geoBlockedMsg)
 		}
 		if err == nil && webEmpty(b) && (fresh || cursor == "") && !webTokenDead(b, err) {
 			b, err = fetchWebComedy(cat, *c.count, prof, sess, "", false)
@@ -217,8 +213,8 @@ func Run(args []string) {
 	}
 
 	n := stream(ctx, body, next, func(b []byte) ([]video, string, error) {
-		return parseWeb(b, cat, prof)
-	}, *c.dumpJSON, *c.limit, sessPath, sess, &savePin)
+		return parseWeb(b, cat)
+	}, *c.dumpJSON, *c.limit, sessPath, sess)
 	if ctx.Err() != nil {
 		fmt.Fprintf(os.Stderr, "stopped total=%d\n", n)
 	}

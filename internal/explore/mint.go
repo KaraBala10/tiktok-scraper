@@ -1,7 +1,6 @@
 package explore
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -52,11 +51,8 @@ func sharedWebClient() (tls_client.HttpClient, error) {
 	return webC, webErr
 }
 
-func mintSession(parent context.Context) (*pinnedSession, error) {
+func mintSession() (*pinnedSession, error) {
 	fmt.Fprintln(os.Stderr, "minting msToken via Go (Chrome TLS)")
-
-	_, cancel := context.WithTimeout(parent, 40*time.Second)
-	defer cancel()
 
 	client, err := sharedWebClient()
 	if err != nil {
@@ -100,7 +96,7 @@ func mintSession(parent context.Context) (*pinnedSession, error) {
 	if err != nil {
 		return nil, fmt.Errorf("mint comedy: %w", err)
 	}
-	if webTokenDead(body, nil) || webEmpty(body) {
+	if webEmpty(body) {
 		return nil, fmt.Errorf("mint: web comedy still empty (bytes=%d captcha=%v)", len(body), strings.Contains(string(body), "bdturing"))
 	}
 
@@ -116,7 +112,6 @@ func mintSession(parent context.Context) (*pinnedSession, error) {
 		OdinID:        ids.OdinID,
 		WebIDLastTime: ids.WebIDLastTime,
 		Region:        region,
-		CSRF:          cookies["tt_csrf_token"],
 		CapturedAt:    time.Now().UTC().Format(time.RFC3339),
 	}, nil
 }

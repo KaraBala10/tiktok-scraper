@@ -18,7 +18,7 @@ func wantsHelp(args []string) bool {
 			return true
 		}
 	}
-		return false
+	return false
 }
 
 func printHelp() {

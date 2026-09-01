@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -28,11 +29,7 @@ var defaultCategories = map[string]int{
 
 type regionProfile struct {
 	Code     string `json:"-"`
-	Name     string `json:"name"`
 	Language string `json:"language"`
-	Locale   string `json:"locale"`
-	MCC      string `json:"mcc"`
-	MCCMNC   string `json:"mccmnc"`
 	Timezone string `json:"timezone"`
 }
 
@@ -87,13 +84,12 @@ func formatCounts(m map[string]int) string {
 	for k, n := range m {
 		list = append(list, kv{k, n})
 	}
-	for i := 0; i < len(list); i++ {
-		for j := i + 1; j < len(list); j++ {
-			if list[j].n > list[i].n || (list[j].n == list[i].n && list[j].k < list[i].k) {
-				list[i], list[j] = list[j], list[i]
-			}
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].n != list[j].n {
+			return list[i].n > list[j].n
 		}
-	}
+		return list[i].k < list[j].k
+	})
 	parts := make([]string, 0, len(list))
 	for _, x := range list {
 		parts = append(parts, fmt.Sprintf("%s:%d", x.k, x.n))

@@ -109,7 +109,7 @@ func pageCursor(body []byte) string {
 	return s
 }
 
-func parseWeb(body []byte, cat int, p regionProfile) ([]video, string, error) {
+func parseWeb(body []byte, cat int) ([]video, string, error) {
 	if len(body) == 0 {
 		return nil, "", fmt.Errorf("empty body (slide verify); token mint failed")
 	}
@@ -133,12 +133,18 @@ func parseWeb(body []byte, cat int, p regionProfile) ([]video, string, error) {
 		}
 		langs[lang]++
 		out = append(out, video{
-			URL:  "https://www.tiktok.com/@" + user + "/video/" + it.ID,
-			User: user,
-			Desc: it.Desc,
+			URL: "https://www.tiktok.com/@" + user + "/video/" + it.ID,
 		})
 	}
 	return out, fmt.Sprintf("source=web-comedy categoryType=%d geo=ip items=%d langs=%s", cat, len(out), formatCounts(langs)), nil
+}
+
+func webBadBody(body []byte) bool {
+	if len(body) == 0 || bytes.Contains(body, []byte("bdturing-verify")) {
+		return true
+	}
+	var page webResp
+	return json.Unmarshal(body, &page) != nil
 }
 
 func webTokenDead(body []byte, err error) bool {
@@ -148,28 +154,11 @@ func webTokenDead(body []byte, err error) bool {
 	if err != nil {
 		return true
 	}
-	if len(body) == 0 {
-		return true
-	}
-	if bytes.Contains(body, []byte("bdturing-verify")) {
-		return true
-	}
-	var page webResp
-	if json.Unmarshal(body, &page) != nil {
-		return true
-	}
-	switch page.StatusCode {
-	case 0:
-		return false
-	case 10000, 100001:
-		return true
-	default:
-		return false
-	}
+	return webBadBody(body) || webLoginDead(body)
 }
 
 func webEmpty(body []byte) bool {
-	if len(body) == 0 || bytes.Contains(body, []byte("bdturing-verify")) {
+	if webBadBody(body) {
 		return true
 	}
 	var page webResp
@@ -180,9 +169,6 @@ func webEmpty(body []byte) bool {
 }
 
 func webLoginDead(body []byte) bool {
-	if len(body) == 0 || bytes.Contains(body, []byte("bdturing-verify")) {
-		return false
-	}
 	var page webResp
 	if json.Unmarshal(body, &page) != nil {
 		return false
