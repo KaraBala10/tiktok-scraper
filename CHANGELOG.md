@@ -7,6 +7,12 @@ and version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-01
+
+### Fixed
+
+- Explore session region now follows the current IP (e.g. `AR`) instead of printing `?` on mint and then saving the `-region` default (`KW`)
+
 ## [0.3.0] - 2026-09-01
 
 ### Added
