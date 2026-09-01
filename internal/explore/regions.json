@@ -1,0 +1,330 @@
+{
+  "KW": {
+    "name": "الكويت",
+    "language": "ar",
+    "locale": "ar_KW",
+    "mcc": "419",
+    "mccmnc": "41902",
+    "timezone": "Asia/Kuwait"
+  },
+  "SA": {
+    "name": "السعودية",
+    "language": "ar",
+    "locale": "ar_SA",
+    "mcc": "420",
+    "mccmnc": "42001",
+    "timezone": "Asia/Riyadh"
+  },
+  "AE": {
+    "name": "الإمارات",
+    "language": "ar",
+    "locale": "ar_AE",
+    "mcc": "424",
+    "mccmnc": "42402",
+    "timezone": "Asia/Dubai"
+  },
+  "QA": {
+    "name": "قطر",
+    "language": "ar",
+    "locale": "ar_QA",
+    "mcc": "427",
+    "mccmnc": "42701",
+    "timezone": "Asia/Qatar"
+  },
+  "BH": {
+    "name": "البحرين",
+    "language": "ar",
+    "locale": "ar_BH",
+    "mcc": "426",
+    "mccmnc": "42601",
+    "timezone": "Asia/Bahrain"
+  },
+  "OM": {
+    "name": "عمان",
+    "language": "ar",
+    "locale": "ar_OM",
+    "mcc": "422",
+    "mccmnc": "42202",
+    "timezone": "Asia/Muscat"
+  },
+  "EG": {
+    "name": "مصر",
+    "language": "ar",
+    "locale": "ar_EG",
+    "mcc": "602",
+    "mccmnc": "60201",
+    "timezone": "Africa/Cairo"
+  },
+  "IQ": {
+    "name": "العراق",
+    "language": "ar",
+    "locale": "ar_IQ",
+    "mcc": "418",
+    "mccmnc": "41805",
+    "timezone": "Asia/Baghdad"
+  },
+  "JO": {
+    "name": "الأردن",
+    "language": "ar",
+    "locale": "ar_JO",
+    "mcc": "416",
+    "mccmnc": "41601",
+    "timezone": "Asia/Amman"
+  },
+  "LB": {
+    "name": "لبنان",
+    "language": "ar",
+    "locale": "ar_LB",
+    "mcc": "415",
+    "mccmnc": "41501",
+    "timezone": "Asia/Beirut"
+  },
+  "PS": {
+    "name": "فلسطين",
+    "language": "ar",
+    "locale": "ar_PS",
+    "mcc": "425",
+    "mccmnc": "42505",
+    "timezone": "Asia/Gaza"
+  },
+  "YE": {
+    "name": "اليمن",
+    "language": "ar",
+    "locale": "ar_YE",
+    "mcc": "421",
+    "mccmnc": "42101",
+    "timezone": "Asia/Aden"
+  },
+  "SY": {
+    "name": "سوريا",
+    "language": "ar",
+    "locale": "ar_SY",
+    "mcc": "417",
+    "mccmnc": "41701",
+    "timezone": "Asia/Damascus"
+  },
+  "MA": {
+    "name": "المغرب",
+    "language": "ar",
+    "locale": "ar_MA",
+    "mcc": "604",
+    "mccmnc": "60400",
+    "timezone": "Africa/Casablanca"
+  },
+  "DZ": {
+    "name": "الجزائر",
+    "language": "ar",
+    "locale": "ar_DZ",
+    "mcc": "603",
+    "mccmnc": "60301",
+    "timezone": "Africa/Algiers"
+  },
+  "TN": {
+    "name": "تونس",
+    "language": "ar",
+    "locale": "ar_TN",
+    "mcc": "605",
+    "mccmnc": "60501",
+    "timezone": "Africa/Tunis"
+  },
+  "LY": {
+    "name": "ليبيا",
+    "language": "ar",
+    "locale": "ar_LY",
+    "mcc": "606",
+    "mccmnc": "60600",
+    "timezone": "Africa/Tripoli"
+  },
+  "SD": {
+    "name": "السودان",
+    "language": "ar",
+    "locale": "ar_SD",
+    "mcc": "634",
+    "mccmnc": "63401",
+    "timezone": "Africa/Khartoum"
+  },
+  "TR": {
+    "name": "تركيا",
+    "language": "tr",
+    "locale": "tr_TR",
+    "mcc": "286",
+    "mccmnc": "28601",
+    "timezone": "Europe/Istanbul"
+  },
+  "US": {
+    "name": "أمريكا",
+    "language": "en",
+    "locale": "en_US",
+    "mcc": "310",
+    "mccmnc": "310260",
+    "timezone": "America/New_York"
+  },
+  "GB": {
+    "name": "بريطانيا",
+    "language": "en",
+    "locale": "en_GB",
+    "mcc": "234",
+    "mccmnc": "23415",
+    "timezone": "Europe/London"
+  },
+  "CA": {
+    "name": "كندا",
+    "language": "en",
+    "locale": "en_CA",
+    "mcc": "302",
+    "mccmnc": "302720",
+    "timezone": "America/Toronto"
+  },
+  "AU": {
+    "name": "أستراليا",
+    "language": "en",
+    "locale": "en_AU",
+    "mcc": "505",
+    "mccmnc": "50501",
+    "timezone": "Australia/Sydney"
+  },
+  "FR": {
+    "name": "فرنسا",
+    "language": "fr",
+    "locale": "fr_FR",
+    "mcc": "208",
+    "mccmnc": "20801",
+    "timezone": "Europe/Paris"
+  },
+  "DE": {
+    "name": "ألمانيا",
+    "language": "de",
+    "locale": "de_DE",
+    "mcc": "262",
+    "mccmnc": "26201",
+    "timezone": "Europe/Berlin"
+  },
+  "IT": {
+    "name": "إيطاليا",
+    "language": "it",
+    "locale": "it_IT",
+    "mcc": "222",
+    "mccmnc": "22201",
+    "timezone": "Europe/Rome"
+  },
+  "ES": {
+    "name": "إسبانيا",
+    "language": "es",
+    "locale": "es_ES",
+    "mcc": "214",
+    "mccmnc": "21401",
+    "timezone": "Europe/Madrid"
+  },
+  "NL": {
+    "name": "هولندا",
+    "language": "nl",
+    "locale": "nl_NL",
+    "mcc": "204",
+    "mccmnc": "20404",
+    "timezone": "Europe/Amsterdam"
+  },
+  "BR": {
+    "name": "البرازيل",
+    "language": "pt",
+    "locale": "pt_BR",
+    "mcc": "724",
+    "mccmnc": "72405",
+    "timezone": "America/Sao_Paulo"
+  },
+  "MX": {
+    "name": "المكسيك",
+    "language": "es",
+    "locale": "es_MX",
+    "mcc": "334",
+    "mccmnc": "334020",
+    "timezone": "America/Mexico_City"
+  },
+  "IN": {
+    "name": "الهند",
+    "language": "en",
+    "locale": "en_IN",
+    "mcc": "404",
+    "mccmnc": "40401",
+    "timezone": "Asia/Kolkata"
+  },
+  "PK": {
+    "name": "باكستان",
+    "language": "ur",
+    "locale": "ur_PK",
+    "mcc": "410",
+    "mccmnc": "41001",
+    "timezone": "Asia/Karachi"
+  },
+  "ID": {
+    "name": "إندونيسيا",
+    "language": "id",
+    "locale": "id_ID",
+    "mcc": "510",
+    "mccmnc": "51001",
+    "timezone": "Asia/Jakarta"
+  },
+  "MY": {
+    "name": "ماليزيا",
+    "language": "ms",
+    "locale": "ms_MY",
+    "mcc": "502",
+    "mccmnc": "50212",
+    "timezone": "Asia/Kuala_Lumpur"
+  },
+  "SG": {
+    "name": "سنغافورة",
+    "language": "en",
+    "locale": "en_SG",
+    "mcc": "525",
+    "mccmnc": "52501",
+    "timezone": "Asia/Singapore"
+  },
+  "PH": {
+    "name": "الفلبين",
+    "language": "en",
+    "locale": "en_PH",
+    "mcc": "515",
+    "mccmnc": "51502",
+    "timezone": "Asia/Manila"
+  },
+  "JP": {
+    "name": "اليابان",
+    "language": "ja",
+    "locale": "ja_JP",
+    "mcc": "440",
+    "mccmnc": "44010",
+    "timezone": "Asia/Tokyo"
+  },
+  "KR": {
+    "name": "كوريا",
+    "language": "ko",
+    "locale": "ko_KR",
+    "mcc": "450",
+    "mccmnc": "45005",
+    "timezone": "Asia/Seoul"
+  },
+  "RU": {
+    "name": "روسيا",
+    "language": "ru",
+    "locale": "ru_RU",
+    "mcc": "250",
+    "mccmnc": "25001",
+    "timezone": "Europe/Moscow"
+  },
+  "NG": {
+    "name": "نيجيريا",
+    "language": "en",
+    "locale": "en_NG",
+    "mcc": "621",
+    "mccmnc": "62120",
+    "timezone": "Africa/Lagos"
+  },
+  "ZA": {
+    "name": "جنوب أفريقيا",
+    "language": "en",
+    "locale": "en_ZA",
+    "mcc": "655",
+    "mccmnc": "65501",
+    "timezone": "Africa/Johannesburg"
+  }
+}

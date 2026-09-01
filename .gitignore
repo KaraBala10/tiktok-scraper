@@ -1,2 +1,6 @@
 /tiktok_scraper
 /tiktok_scraper.exe
+session.json
+cookies.txt
+device_id.txt
+tiktok_web/

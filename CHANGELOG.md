@@ -7,6 +7,25 @@ and version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-01
+
+### Added
+
+- Explore mode (`-explore`) that lists TikTok web Comedy chip videos (`categoryType=104`) until Ctrl+C, or `-limit N`
+- Automatic web `msToken` mint via Chrome TLS impersonation when no session exists; `-refresh` forces a new token
+- `--help` listing profile and explore flags
+- Explore session files under `~/.cache/tiktok_scraper/` (`session.json`, `cookies.txt`, `device_id.txt`)
+
+### Changed
+
+- Split the CLI into `internal/profile` (original scraper) and `internal/explore` (web comedy)
+- Explore follows the current IP for geo; `-region` only fills the query pack
+- Bump `tls-client` to v1.9.2, `fhttp` to v0.5.36, and Go 1.23-compatible indirect modules
+
+### Removed
+
+- App Explore fallback (unsigned mobile feed). Explore is web-only
+
 ## [0.2.0] - 2026-09-01
 
 ### Changed

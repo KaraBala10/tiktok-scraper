@@ -2,8 +2,8 @@
   <img src="assets/logo.png" alt="tiktok-scraper" width="160" height="160" />
   <h1>tiktok-scraper</h1>
   <p>
-    HTTP scraper that lists every video URL on a TikTok profile.<br />
-    No browser. Stdlib only. Prints each URL as soon as it arrives.
+    HTTP scraper that lists public TikTok video URLs.<br />
+    Profile pages or Explore Comedy. No browser. Prints each URL as soon as it arrives.
   </p>
   <p>
     <a href="https://github.com/KaraBala10/tiktok-scraper/releases/latest"><img src="https://img.shields.io/github/v/release/KaraBala10/tiktok-scraper?style=for-the-badge&logo=github&label=latest%20release" alt="Latest release" /></a>
@@ -55,6 +55,12 @@ The exact filename changes with each version. Use the file listed on the [latest
 
 ## Usage
 
+```bash
+./tiktok_scraper --help
+```
+
+### Profile
+
 Pass a username, an `@username`, or a profile/video URL:
 
 ```bash
@@ -71,14 +77,29 @@ Pass a username, an `@username`, or a profile/video URL:
 ./tiktok_scraper @user2458298226194 > urls.txt
 ```
 
-### Options
-
 | Flag | Default | Description |
 | --- | --- | --- |
 | `-limit N` | `0` | Stop after `N` videos. `0` means the full profile. |
 | `-v` | off | Write per-request timings to stderr. |
 
-Run with no arguments to print usage.
+### Explore
+
+Web Comedy chip. Geo follows the current IP. A session is minted automatically and stored in the cache dir.
+
+```bash
+./tiktok_scraper -explore -category comedy
+./tiktok_scraper -explore -category comedy -limit 20
+./tiktok_scraper -explore -refresh
+```
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-explore` | off | Use Explore instead of a profile. |
+| `-category` | `comedy` | Explore chip (`comedy` is `104`). |
+| `-limit N` | `0` | Stop after `N` videos. `0` means until Ctrl+C. |
+| `-refresh` | off | Mint a new web `msToken` even if a session exists. |
+| `-region` | `KW` | Query-pack region. Does not override IP geo. |
+| `--help` | | Print all flags. |
 
 ## Output
 
@@ -116,6 +137,9 @@ Files under `~/.cache/tiktok_scraper/` (or `$TMPDIR/tiktok_scraper/` if the user
 | `tls-session.json` | TLS session tickets for faster handshakes |
 | `cadence.json` | Posting cadence and page-boundary marks for parallel paging |
 | `dns.json` | Last working IP per host, used if DNS fails |
+| `session.json` | Explore web cookies / `msToken` |
+| `cookies.txt` | Cookie header copy of the explore session |
+| `device_id.txt` | Explore web `device_id` |
 
 Delete that directory to start clean.
 
@@ -145,7 +169,7 @@ This project follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.
 
 Only needed if you are changing the code. Users should install from the [latest release](https://github.com/KaraBala10/tiktok-scraper/releases/latest).
 
-Requires [Go 1.23+](https://go.dev/doc/go1.23). No third-party modules.
+Requires [Go 1.23+](https://go.dev/doc/go1.23).
 
 ```bash
 git clone https://github.com/KaraBala10/tiktok-scraper.git
