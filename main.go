@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,37 +24,23 @@ import (
 )
 
 const (
-	maxPages    = 10000
-	pageWorkers = 10
+	maxPages          = 10000
+	pageWorkers       = 12
+	guessSpacingItems = 10
+	guessBudget       = 16
+	markStride        = 13
+	dnsPinTTL         = 24 * time.Hour
+	dnsPinDialTimeout = 3 * time.Second
 )
 
 var (
 	videoPathRE  = regexp.MustCompile(`/video/(\d{15,25})`)
 	secUIDRE     = regexp.MustCompile(`"secUid":"(MS4wLjABAAAA[^"]+)"`)
 	sessionCache = loadSessionCache()
+	dnsStore     = loadDNSCache()
 	client       = newFastClient()
 	verbose      bool
 )
-
-func init() {
-	go warmTLS(client)
-}
-
-func warmTLS(c *http.Client) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://www.tiktok.com/favicon.ico", nil)
-	if err != nil {
-		return
-	}
-	setHeaders(req, "*/*")
-	resp, err := c.Do(req)
-	if err != nil {
-		return
-	}
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
-	resp.Body.Close()
-}
 
 func vlog(format string, args ...any) {
 	if !verbose {
@@ -87,12 +74,30 @@ func newStream(limit int) *stream {
 
 func (s *stream) printer() {
 	defer close(s.done)
-	out := bufio.NewWriterSize(os.Stdout, 4096)
+	out := bufio.NewWriterSize(os.Stdout, 64<<10)
 	i := 0
-	for u := range s.queue {
+	flushed := true
+	for {
+		var u string
+		var ok bool
+		if flushed {
+			u, ok = <-s.queue
+		} else {
+			select {
+			case u, ok = <-s.queue:
+			default:
+				_ = out.Flush()
+				flushed = true
+				continue
+			}
+		}
+		if !ok {
+			_ = out.Flush()
+			return
+		}
 		i++
 		fmt.Fprintf(out, "%d. %s\n", i, u)
-		_ = out.Flush()
+		flushed = false
 	}
 }
 
@@ -129,6 +134,19 @@ func (s *stream) add(u string) bool {
 	s.mu.Unlock()
 	s.queue <- u
 	return okMore
+}
+
+func (s *stream) remaining() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.limit <= 0 {
+		return -1
+	}
+	r := s.limit - s.n
+	if r < 0 {
+		r = 0
+	}
+	return r
 }
 
 func (s *stream) lastVideoID() string {
@@ -207,6 +225,8 @@ func main() {
 	}
 
 	n, t, err := fetchVideoURLs(username, *limit)
+	sessionCache.flushNow()
+	dnsStore.flushNow()
 	if err != nil && n == 0 {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -312,27 +332,219 @@ func (c *diskSessionCache) Put(sessionKey string, cs *tls.ClientSessionState) {
 		time.Sleep(200 * time.Millisecond)
 		c.mu.Lock()
 		c.flushScheduled = false
-		stored := make(map[string]savedSession, len(c.mem))
-		for k, st := range c.mem {
-			ticket, state, err := st.ResumptionState()
-			if err != nil || state == nil {
-				continue
-			}
-			b, err := state.Bytes()
-			if err != nil {
-				continue
-			}
-			stored[k] = savedSession{Ticket: ticket, State: b}
-		}
-		path := c.path
 		c.mu.Unlock()
-		_ = os.MkdirAll(filepath.Dir(path), 0o755)
-		raw, err := json.Marshal(stored)
-		if err != nil {
-			return
-		}
-		_ = os.WriteFile(path, raw, 0o600)
+		c.flushNow()
 	}()
+}
+
+func (c *diskSessionCache) flushNow() {
+	c.mu.Lock()
+	stored := make(map[string]savedSession, len(c.mem))
+	for k, st := range c.mem {
+		ticket, state, err := st.ResumptionState()
+		if err != nil || state == nil {
+			continue
+		}
+		b, err := state.Bytes()
+		if err != nil {
+			continue
+		}
+		stored[k] = savedSession{Ticket: ticket, State: b}
+	}
+	path := c.path
+	c.mu.Unlock()
+	if len(stored) == 0 {
+		return
+	}
+	_ = os.MkdirAll(filepath.Dir(path), 0o755)
+	raw, err := json.Marshal(stored)
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(path, raw, 0o600)
+}
+
+type throttle struct {
+	mu    sync.Mutex
+	sem   chan struct{}
+	until time.Time
+	next  time.Time
+}
+
+var pace = &throttle{sem: make(chan struct{}, 4)}
+
+func (t *throttle) waitCooldown(ctx context.Context) error {
+	for {
+		t.mu.Lock()
+		d := time.Until(t.until)
+		t.mu.Unlock()
+		if d <= 0 {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(d):
+		}
+	}
+}
+
+func (t *throttle) acquire(ctx context.Context, urgent bool) (func(), error) {
+	if err := t.waitCooldown(ctx); err != nil {
+		return nil, err
+	}
+	if urgent {
+		return func() {}, nil
+	}
+	select {
+	case t.sem <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	release := func() { <-t.sem }
+	t.mu.Lock()
+	now := time.Now()
+	if t.next.Before(now) {
+		t.next = now
+	}
+	wait := t.next.Sub(now)
+	t.next = t.next.Add(50 * time.Millisecond)
+	t.mu.Unlock()
+	if wait > 0 {
+		select {
+		case <-time.After(wait):
+		case <-ctx.Done():
+			release()
+			return nil, ctx.Err()
+		}
+	}
+	return release, nil
+}
+
+func (t *throttle) trip(d time.Duration) {
+	t.mu.Lock()
+	if u := time.Now().Add(d); u.After(t.until) {
+		t.until = u
+	}
+	t.mu.Unlock()
+}
+
+type dnsEntry struct {
+	IP string `json:"ip"`
+	TS int64  `json:"ts"`
+}
+
+// dnsCache pins the last IP that answered for a host so a cold run can skip
+// resolution entirely. A resolver hiccup then costs nothing instead of killing
+// the run, which is what "Temporary failure in name resolution" used to do.
+type dnsCache struct {
+	mu    sync.Mutex
+	m     map[string]dnsEntry
+	path  string
+	dirty bool
+}
+
+func loadDNSCache() *dnsCache {
+	dir, err := os.UserCacheDir()
+	if err != nil {
+		dir = os.TempDir()
+	}
+	c := &dnsCache{
+		m:    make(map[string]dnsEntry, 4),
+		path: filepath.Join(dir, "tiktok_scraper", "dns.json"),
+	}
+	if raw, err := os.ReadFile(c.path); err == nil {
+		_ = json.Unmarshal(raw, &c.m)
+	}
+	return c
+}
+
+func (c *dnsCache) get(host string) (string, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, ok := c.m[host]
+	if !ok || e.IP == "" || time.Since(time.Unix(e.TS, 0)) > dnsPinTTL {
+		return "", false
+	}
+	return e.IP, true
+}
+
+func (c *dnsCache) put(host, ip string) {
+	if host == "" || ip == "" {
+		return
+	}
+	c.mu.Lock()
+	if e, ok := c.m[host]; !ok || e.IP != ip || time.Since(time.Unix(e.TS, 0)) > time.Hour {
+		c.dirty = true
+		c.m[host] = dnsEntry{IP: ip, TS: time.Now().Unix()}
+	}
+	c.mu.Unlock()
+}
+
+func (c *dnsCache) drop(host string) {
+	if host == "" {
+		return
+	}
+	c.mu.Lock()
+	if _, ok := c.m[host]; ok {
+		delete(c.m, host)
+		c.dirty = true
+	}
+	c.mu.Unlock()
+}
+
+func (c *dnsCache) flushNow() {
+	c.mu.Lock()
+	if !c.dirty {
+		c.mu.Unlock()
+		return
+	}
+	c.dirty = false
+	raw, err := json.Marshal(c.m)
+	path := c.path
+	c.mu.Unlock()
+	if err != nil {
+		return
+	}
+	_ = os.MkdirAll(filepath.Dir(path), 0o755)
+	_ = os.WriteFile(path, raw, 0o600)
+}
+
+func dialPinned(ctx context.Context, d *net.Dialer, addr string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return d.DialContext(ctx, "tcp4", addr)
+	}
+	if ip, ok := dnsStore.get(host); ok {
+		pinCtx, cancel := context.WithTimeout(ctx, dnsPinDialTimeout)
+		conn, err := d.DialContext(pinCtx, "tcp4", net.JoinHostPort(ip, port))
+		cancel()
+		if err == nil {
+			return conn, nil
+		}
+		if ctx.Err() != nil {
+			return nil, err
+		}
+		dnsStore.drop(host)
+	}
+	conn, err := d.DialContext(ctx, "tcp4", addr)
+	if err != nil {
+		return nil, err
+	}
+	if ta, ok := conn.RemoteAddr().(*net.TCPAddr); ok && ta.IP != nil {
+		dnsStore.put(host, ta.IP.String())
+	}
+	return conn, nil
+}
+
+// doRequest drops the pinned IP on any transport failure, so a stale pin that
+// still accepts TCP but fails TLS cannot outlive a single attempt.
+func doRequest(c *http.Client, req *http.Request) (*http.Response, error) {
+	resp, err := c.Do(req)
+	if err != nil && req.Context().Err() == nil {
+		dnsStore.drop(req.URL.Hostname())
+	}
+	return resp, err
 }
 
 func newFastClient() *http.Client {
@@ -345,7 +557,7 @@ func newFastClient() *http.Client {
 		Transport: &http.Transport{
 			Proxy: http.ProxyFromEnvironment,
 			DialContext: func(ctx context.Context, _, addr string) (net.Conn, error) {
-				return dialer.DialContext(ctx, "tcp4", addr)
+				return dialPinned(ctx, dialer, addr)
 			},
 			ForceAttemptHTTP2:     true,
 			MaxIdleConns:          32,
@@ -485,7 +697,7 @@ func fetchEmbedURLs(username string, limit int, emit func(string)) (timings, err
 	}
 	setHeaders(req, "text/html")
 
-	resp, err := client.Do(req)
+	resp, err := doRequest(client, req)
 	if err != nil {
 		return t, err
 	}
@@ -536,22 +748,35 @@ func fetchSecUID(username, videoID string) (string, error) {
 		return "", err
 	}
 	setHeaders(req, "text/html")
-	resp, err := client.Do(req)
+	resp, err := doRequest(client, req)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-	if err != nil {
-		return "", err
+	buf := make([]byte, 0, 64<<10)
+	tmp := make([]byte, 32<<10)
+	var total int64
+	for total < 8<<20 {
+		n, rerr := resp.Body.Read(tmp)
+		if n > 0 {
+			total += int64(n)
+			buf = append(buf, tmp[:n]...)
+			if m := secUIDRE.FindSubmatch(buf); len(m) >= 2 {
+				uid := string(m[1])
+				saveCachedSecUID(username, uid)
+				return uid, nil
+			}
+			if len(buf) > 8<<10 {
+				keep := 256
+				copy(buf, buf[len(buf)-keep:])
+				buf = buf[:keep]
+			}
+		}
+		if rerr != nil {
+			break
+		}
 	}
-	m := secUIDRE.FindSubmatch(body)
-	if len(m) < 2 {
-		return "", fmt.Errorf("secUid not found")
-	}
-	uid := string(m[1])
-	saveCachedSecUID(username, uid)
-	return uid, nil
+	return "", fmt.Errorf("secUid not found")
 }
 
 func secUIDCachePath() string {
@@ -606,9 +831,11 @@ func fetchItemList(secUID, username string, cursor int64, s *stream) (int, error
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	store := &blockStore{}
+	spec := newSpecState(username, s)
+	defer spec.save()
+	store := newBlockStore(spec)
 	cache := newPageCache()
-	jobs := make(chan int64, 256)
+	jobs := make(chan int64, 512)
 	priority := make(chan int64, 64)
 	var queued sync.Map
 
@@ -637,10 +864,11 @@ func fetchItemList(secUID, username string, cursor int64, s *stream) (int, error
 		}
 	}
 
-	runJob := func(c int64) {
-		items, hasMore, err := cache.get(ctx, secUID, c, store, client)
+	spec.enq = enqueue
+
+	runJob := func(c int64, urgent bool) {
+		items, hasMore, err := cache.get(ctx, secUID, c, store, client, urgent)
 		if err != nil {
-			queued.Delete(c)
 			if ctx.Err() == nil {
 				vlog("worker cursor=%d err=%v", c, err)
 			}
@@ -665,7 +893,7 @@ func fetchItemList(secUID, username string, cursor int64, s *stream) (int, error
 					if !ok {
 						return
 					}
-					runJob(c)
+					runJob(c, true)
 				default:
 					select {
 					case <-ctx.Done():
@@ -674,20 +902,32 @@ func fetchItemList(secUID, username string, cursor int64, s *stream) (int, error
 						if !ok {
 							return
 						}
-						runJob(c)
+						runJob(c, true)
 					case c, ok := <-jobs:
 						if !ok {
 							return
 						}
-						runJob(c)
+						runJob(c, false)
 					}
 				}
 			}
 		}()
 	}
+	spec.topUp()
+
+	emitItems := func(batch []ttItem) int64 {
+		var lastCreate int64
+		for _, it := range batch {
+			lastCreate = it.CreateTime
+			if !s.add(itemURL(username, it)) {
+				break
+			}
+		}
+		return lastCreate
+	}
 
 	t0 := time.Now()
-	page1, err := fetchItemListPage(ctx, secUID, cursor, client)
+	page1, err := fetchItemListPage(ctx, secUID, cursor, client, true)
 	pages := 1
 	if err != nil {
 		cancel()
@@ -705,17 +945,6 @@ func fetchItemList(secUID, username string, cursor int64, s *stream) (int, error
 		return pages, nil
 	}
 
-	emitItems := func(batch []ttItem) int64 {
-		var lastCreate int64
-		for _, it := range batch {
-			lastCreate = it.CreateTime
-			if !s.add(itemURL(username, it)) {
-				break
-			}
-		}
-		return lastCreate
-	}
-
 	before := s.n
 	lastCreate := emitItems(items)
 	vlog("page 1 %s +%d total=%d workers=%d hasMore=%t n=%d", time.Since(t0).Round(time.Millisecond), s.n-before, s.n, pageWorkers, hasMore, len(items))
@@ -723,9 +952,6 @@ func fetchItemList(secUID, username string, cursor int64, s *stream) (int, error
 		cancel()
 		wg.Wait()
 		return pages, nil
-	}
-	for _, g := range guessFromItems(items) {
-		enqueue(g, false)
 	}
 	enqueue(lastCreate*1000, true)
 
@@ -745,11 +971,13 @@ func fetchItemList(secUID, username string, cursor int64, s *stream) (int, error
 		more  bool
 		err   error
 	}
-	poll := time.NewTicker(2 * time.Millisecond)
-	defer poll.Stop()
+	fallback := time.NewTicker(25 * time.Millisecond)
+	defer fallback.Stop()
 
-	for s.more() && lastCreate != 0 {
+	misses := 0
+	for s.more() && lastCreate != 0 && pages < maxPages {
 		if rest, found, more := store.takeFrom(s.lastVideoID()); found && len(rest) > 0 {
+			misses = 0
 			if !emitOverlap(rest, more) {
 				break
 			}
@@ -764,7 +992,28 @@ func fetchItemList(secUID, username string, cursor int64, s *stream) (int, error
 		got := make(chan pageGot, 1)
 		t0 = time.Now()
 		go func(cur int64) {
-			it, hm, err := cache.get(ctx, secUID, cur, store, client)
+			it, hm, err := cache.get(ctx, secUID, cur, store, client, true)
+			if (err != nil || len(it) == 0) && ctx.Err() == nil && s.more() {
+				vlog("chain retry cursor=%d err=%v n=%d", cur, err, len(it))
+				select {
+				case <-time.After(800 * time.Millisecond):
+				case <-ctx.Done():
+					got <- pageGot{it, hm, err}
+					return
+				}
+				p2, err2 := fetchItemListPage(ctx, secUID, cur, client, true)
+				if err2 != nil {
+					got <- pageGot{nil, false, err2}
+					return
+				}
+				it2 := p2.items()
+				if len(it2) > 0 {
+					cache.put(cur, it2, p2.HasMorePrevious)
+					store.put(it2, p2.HasMorePrevious)
+				}
+				got <- pageGot{it2, p2.HasMorePrevious, nil}
+				return
+			}
 			got <- pageGot{it, hm, err}
 		}(next)
 
@@ -772,6 +1021,7 @@ func fetchItemList(secUID, username string, cursor int64, s *stream) (int, error
 		fromCache := false
 		for {
 			if rest, found, more := store.takeFrom(s.lastVideoID()); found && len(rest) > 0 {
+				misses = 0
 				if !emitOverlap(rest, more) {
 					lastCreate = 0
 				}
@@ -780,7 +1030,9 @@ func fetchItemList(secUID, username string, cursor int64, s *stream) (int, error
 			select {
 			case g = <-got:
 				fromCache = true
-			case <-poll.C:
+			case <-store.notify:
+				continue
+			case <-fallback.C:
 				continue
 			case <-ctx.Done():
 				lastCreate = 0
@@ -793,18 +1045,20 @@ func fetchItemList(secUID, username string, cursor int64, s *stream) (int, error
 
 		cursor = next
 		pages++
-		if g.err != nil {
-			if s.n > 0 {
+		if g.err != nil || len(g.items) == 0 {
+			misses++
+			vlog("page %d %s miss=%d err=%v n=%d", pages, time.Since(t0).Round(time.Millisecond), misses, g.err, len(g.items))
+			if s.n == 0 && g.err != nil {
+				cancel()
+				wg.Wait()
+				return pages, g.err
+			}
+			if misses >= 24 {
 				break
 			}
-			cancel()
-			wg.Wait()
-			return pages, g.err
+			continue
 		}
-		if len(g.items) == 0 {
-			vlog("page %d %s empty", pages, time.Since(t0).Round(time.Millisecond))
-			break
-		}
+		misses = 0
 		before = s.n
 		lastCreate = emitItems(g.items)
 		hasMore = g.more
@@ -845,28 +1099,204 @@ func itemURL(username string, it ttItem) string {
 	return "https://www.tiktok.com/@" + author + "/video/" + it.ID
 }
 
-func guessFromItems(items []ttItem) []int64 {
-	if len(items) < 2 {
-		return nil
+type cadenceInfo struct {
+	GapSec int64   `json:"gapSec"`
+	Newest int64   `json:"newest"`
+	Marks  []int64 `json:"marks,omitempty"`
+}
+
+func cadencePath() string {
+	dir, err := os.UserCacheDir()
+	if err != nil {
+		dir = os.TempDir()
 	}
-	newest := items[0].CreateTime
-	oldest := items[len(items)-1].CreateTime
-	span := newest - oldest
-	if span <= 0 {
-		return nil
+	return filepath.Join(dir, "tiktok_scraper", "cadence.json")
+}
+
+type specState struct {
+	mu        sync.Mutex
+	username  string
+	hint      int64
+	anchor    int64
+	minCT     int64
+	maxCT     int64
+	ids       map[string]struct{}
+	cts       []int64
+	marks     []int64
+	frontGap  int64
+	lastFront int64
+	enq       func(int64, bool)
+	s         *stream
+}
+
+func newSpecState(username string, s *stream) *specState {
+	sp := &specState{username: username, s: s}
+	if raw, err := os.ReadFile(cadencePath()); err == nil {
+		var m map[string]cadenceInfo
+		if json.Unmarshal(raw, &m) == nil {
+			if c, ok := m[username]; ok {
+				sp.hint = c.GapSec
+				sp.anchor = c.Newest
+				sp.marks = c.Marks
+			}
+		}
 	}
-	step := span / 3
+	return sp
+}
+
+func (sp *specState) observe(items []ttItem) {
+	sp.mu.Lock()
+	var blkMin, blkMax int64
+	n := 0
+	for _, it := range items {
+		if it.CreateTime <= 0 {
+			continue
+		}
+		if blkMin == 0 || it.CreateTime < blkMin {
+			blkMin = it.CreateTime
+		}
+		if it.CreateTime > blkMax {
+			blkMax = it.CreateTime
+		}
+		n++
+		if sp.ids == nil {
+			sp.ids = make(map[string]struct{}, 256)
+		}
+		if _, ok := sp.ids[it.ID]; !ok {
+			sp.ids[it.ID] = struct{}{}
+			sp.cts = append(sp.cts, it.CreateTime)
+		}
+		if it.CreateTime > sp.maxCT {
+			sp.maxCT = it.CreateTime
+		}
+	}
+	if blkMin > 0 && (sp.minCT == 0 || blkMin < sp.minCT) {
+		sp.minCT = blkMin
+		if n >= 2 && blkMax > blkMin {
+			sp.frontGap = (blkMax - blkMin) / int64(n-1)
+		}
+	}
+	sp.mu.Unlock()
+}
+
+func (sp *specState) gapLocked() int64 {
+	best := int64(0)
+	take := func(g int64) {
+		if g > 0 && (best == 0 || g < best) {
+			best = g
+		}
+	}
+	take(sp.frontGap)
+	take(sp.hint)
+	if cnt := int64(len(sp.ids)); cnt >= 2 && sp.maxCT > sp.minCT {
+		take((sp.maxCT - sp.minCT) / (cnt - 1))
+	}
+	return best
+}
+
+func (sp *specState) topUp() {
+	sp.mu.Lock()
+	enq := sp.enq
+	gap := sp.gapLocked()
+	frontier := sp.minCT
+	if frontier == 0 {
+		frontier = sp.anchor
+	}
+	marks := sp.marks
+	observed := len(sp.ids)
+	skipExtrap := frontier > 0 && frontier == sp.lastFront
+	if frontier > 0 {
+		sp.lastFront = frontier
+	}
+	sp.mu.Unlock()
+	if enq == nil {
+		return
+	}
+	remaining := -1
+	if sp.s != nil {
+		remaining = sp.s.remaining()
+	}
+	if remaining == 0 {
+		return
+	}
+	want := -1
+	if remaining > 0 {
+		want = remaining/markStride + 2
+	}
+	nMarks := len(marks)
+	if want >= 0 && want < nMarks {
+		nMarks = want
+	}
+	upTo := observed/markStride + 6
+	if upTo > nMarks {
+		upTo = nMarks
+	}
+	base := frontier
+	for i := 0; i < upTo; i++ {
+		enq((marks[i]+1)*1000, false)
+		if base == 0 || marks[i] < base {
+			base = marks[i]
+		}
+	}
+	if upTo < nMarks || (want >= 0 && len(marks) >= want) {
+		return
+	}
+	if skipExtrap || gap <= 0 || base <= 0 {
+		return
+	}
+	n := guessBudget
+	if remaining > 0 {
+		if pages := remaining/guessSpacingItems + 1; pages < n {
+			n = pages
+		}
+	}
+	step := gap * guessSpacingItems
 	if step < 1 {
 		step = 1
 	}
-	out := make([]int64, 0, 12)
-	for i := 1; i <= 12; i++ {
-		g := (oldest - int64(i)*step) * 1000
-		if g > 0 {
-			out = append(out, g)
+	for i := 1; i <= n; i++ {
+		c := (base - int64(i)*step) * 1000
+		if c < 1_400_000_000_000 {
+			break
+		}
+		enq(c, false)
+	}
+}
+
+func (sp *specState) save() {
+	sp.mu.Lock()
+	var gap int64
+	if cnt := int64(len(sp.ids)); cnt >= 2 && sp.maxCT > sp.minCT {
+		gap = (sp.maxCT - sp.minCT) / (cnt - 1)
+	}
+	newest := sp.maxCT
+	user := sp.username
+	minCT := sp.minCT
+	cts := append([]int64(nil), sp.cts...)
+	sp.mu.Unlock()
+	if gap <= 0 || newest <= 0 || user == "" {
+		return
+	}
+	sort.Slice(cts, func(i, j int) bool { return cts[i] > cts[j] })
+	marks := make([]int64, 0, len(cts)/markStride+1)
+	for i := markStride - 1; i < len(cts) && len(marks) < 400; i += markStride {
+		marks = append(marks, cts[i])
+	}
+	path := cadencePath()
+	m := map[string]cadenceInfo{}
+	if raw, err := os.ReadFile(path); err == nil {
+		_ = json.Unmarshal(raw, &m)
+	}
+	for _, old := range m[user].Marks {
+		if old < minCT && len(marks) < 400 {
+			marks = append(marks, old)
 		}
 	}
-	return out
+	m[user] = cadenceInfo{GapSec: gap, Newest: newest, Marks: marks}
+	_ = os.MkdirAll(filepath.Dir(path), 0o755)
+	if raw, err := json.Marshal(m); err == nil {
+		_ = os.WriteFile(path, raw, 0o600)
+	}
 }
 
 type pageCache struct {
@@ -891,7 +1321,7 @@ func (c *pageCache) put(cursor int64, items []ttItem, hasMore bool) {
 	c.mu.Unlock()
 }
 
-func (c *pageCache) get(ctx context.Context, secUID string, cursor int64, store *blockStore, hc *http.Client) ([]ttItem, bool, error) {
+func (c *pageCache) get(ctx context.Context, secUID string, cursor int64, store *blockStore, hc *http.Client, urgent bool) ([]ttItem, bool, error) {
 	c.mu.Lock()
 	if items, ok := c.pages[cursor]; ok {
 		hm := c.hasMore[cursor]
@@ -918,7 +1348,7 @@ func (c *pageCache) get(ctx context.Context, secUID string, cursor int64, store 
 	if hc == nil {
 		hc = client
 	}
-	page, err := fetchItemListPage(ctx, secUID, cursor, hc)
+	page, err := fetchItemListPage(ctx, secUID, cursor, hc, urgent)
 	c.mu.Lock()
 	delete(c.inflight, cursor)
 	if err != nil {
@@ -927,11 +1357,15 @@ func (c *pageCache) get(ctx context.Context, secUID string, cursor int64, store 
 		return nil, false, err
 	}
 	items := page.items()
-	c.pages[cursor] = items
-	c.hasMore[cursor] = page.HasMorePrevious
+	if len(items) > 0 {
+		c.pages[cursor] = items
+		c.hasMore[cursor] = page.HasMorePrevious
+	}
 	close(ch)
 	c.mu.Unlock()
-	store.put(items, page.HasMorePrevious)
+	if len(items) > 0 {
+		store.put(items, page.HasMorePrevious)
+	}
 	return items, page.HasMorePrevious, nil
 }
 
@@ -944,11 +1378,20 @@ type blockStore struct {
 	mu     sync.Mutex
 	blocks []itemBlock
 	byID   map[string]int
+	notify chan struct{}
+	spec   *specState
+}
+
+func newBlockStore(spec *specState) *blockStore {
+	return &blockStore{notify: make(chan struct{}, 1), spec: spec}
 }
 
 func (b *blockStore) put(items []ttItem, more bool) {
 	if len(items) == 0 {
 		return
+	}
+	if b.spec != nil {
+		b.spec.observe(items)
 	}
 	b.mu.Lock()
 	if b.byID == nil {
@@ -960,6 +1403,13 @@ func (b *blockStore) put(items []ttItem, more bool) {
 		b.byID[it.ID] = idx
 	}
 	b.mu.Unlock()
+	if b.spec != nil {
+		b.spec.topUp()
+	}
+	select {
+	case b.notify <- struct{}{}:
+	default:
+	}
 }
 
 func (b *blockStore) takeFrom(id string) (rest []ttItem, found bool, more bool) {
@@ -994,7 +1444,7 @@ func (b *blockStore) takeFrom(id string) (rest []ttItem, found bool, more bool) 
 	return nil, false, true
 }
 
-func fetchItemListPage(ctx context.Context, secUID string, cursor int64, c *http.Client) (*itemListResp, error) {
+func fetchItemListPage(ctx context.Context, secUID string, cursor int64, c *http.Client, urgent bool) (*itemListResp, error) {
 	var b strings.Builder
 	b.Grow(160 + len(secUID))
 	b.WriteString("https://www.tiktok.com/api/creator/item_list/?aid=1988&count=15&cursor=")
@@ -1002,29 +1452,71 @@ func fetchItemListPage(ctx context.Context, secUID string, cursor int64, c *http
 	b.WriteString("&secUid=")
 	b.WriteString(secUID)
 	b.WriteString("&type=1")
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, b.String(), nil)
+	u := b.String()
+	var lastErr error
+	for attempt := 0; attempt < 4; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-time.After(time.Duration(200*attempt) * time.Millisecond):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		release, err := pace.acquire(ctx, urgent)
+		if err != nil {
+			return nil, err
+		}
+		page, retry, err := doItemListRequest(ctx, u, c)
+		release()
+		if err == nil {
+			// Only the chain retries an empty page: a speculative cursor past the
+			// end of history is legitimately empty, and retrying it burns requests.
+			if !urgent || len(page.items()) > 0 || attempt >= 2 {
+				return page, nil
+			}
+			lastErr = fmt.Errorf("item_list empty")
+			continue
+		}
+		lastErr = err
+		if !retry {
+			return nil, err
+		}
+	}
+	return nil, lastErr
+}
+
+func doItemListRequest(ctx context.Context, u string, c *http.Client) (*itemListResp, bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	setHeaders(req, "application/json")
-	resp, err := c.Do(req)
+	resp, err := doRequest(c, req)
 	if err != nil {
-		return nil, err
+		return nil, ctx.Err() == nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
-		return nil, fmt.Errorf("item_list HTTP %d", resp.StatusCode)
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusForbidden {
+			pace.trip(1500 * time.Millisecond)
+			return nil, true, fmt.Errorf("item_list HTTP %d", resp.StatusCode)
+		}
+		return nil, resp.StatusCode >= 500, fmt.Errorf("item_list HTTP %d", resp.StatusCode)
 	}
 	var page itemListResp
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&page); err != nil {
-		return nil, err
+		return nil, true, err
 	}
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
 	if page.StatusCode != 0 {
-		return nil, fmt.Errorf("item_list status %d", page.StatusCode)
+		if page.StatusCode == 10102 {
+			pace.trip(1500 * time.Millisecond)
+			return nil, true, fmt.Errorf("item_list status %d", page.StatusCode)
+		}
+		return nil, false, fmt.Errorf("item_list status %d", page.StatusCode)
 	}
-	return &page, nil
+	return &page, false, nil
 }
 
 func readUntilLimit(r io.Reader, username string, limit int, emit func(string)) ([]byte, int) {

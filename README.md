@@ -114,6 +114,8 @@ Files under `~/.cache/tiktok_scraper/` (or `$TMPDIR/tiktok_scraper/` if the user
 | --- | --- |
 | `secuid.json` | Maps username to `secUid`, so later runs skip embed |
 | `tls-session.json` | TLS session tickets for faster handshakes |
+| `cadence.json` | Posting cadence and page-boundary marks for parallel paging |
+| `dns.json` | Last working IP per host, used if DNS fails |
 
 Delete that directory to start clean.
 
