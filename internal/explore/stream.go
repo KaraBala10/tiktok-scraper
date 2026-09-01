@@ -9,7 +9,9 @@ import (
 	"time"
 )
 
-func stream(ctx context.Context, first []byte, next func() ([]byte, error), parse func([]byte) ([]video, string, error), dump bool, limit int, sessPath string, sess *pinnedSession, savePin *bool) int {
+const exploreStall = 20 * time.Second
+
+func stream(ctx context.Context, first []byte, next func(cursor string, fresh bool) ([]byte, error), parse func([]byte) ([]video, string, error), dump bool, limit int, sessPath string, sess *pinnedSession, savePin *bool) int {
 	out := bufio.NewWriterSize(os.Stdout, 64<<10)
 	defer out.Flush()
 	seen := make(map[string]struct{}, 256)
@@ -17,8 +19,14 @@ func stream(ctx context.Context, first []byte, next func() ([]byte, error), pars
 	page := 0
 	body := first
 	backoff := time.Duration(0)
+	cursor := pageCursor(first)
+	lastFresh := time.Time{}
+	dupePages := 0
+	sameCursor := 0
+	prevCur := cursor
 
 	for {
+		fresh := false
 		if dump {
 			if _, err := out.Write(body); err != nil {
 				return n
@@ -34,6 +42,7 @@ func stream(ctx context.Context, first []byte, next func() ([]byte, error), pars
 				if page == 0 {
 					os.Exit(1)
 				}
+				backoff = 2 * time.Second
 			} else {
 				if page == 0 {
 					fmt.Fprintln(os.Stderr, summary)
@@ -56,17 +65,47 @@ func stream(ctx context.Context, first []byte, next func() ([]byte, error), pars
 					}
 				}
 				_ = out.Flush()
-				if added == 0 && page > 0 {
-					backoff = 2 * time.Second
+				cur := pageCursor(body)
+				if added > 0 {
+					dupePages = 0
+					sameCursor = 0
+				} else if page > 0 {
+					dupePages++
+					if cur == "" || cur == prevCur {
+						sameCursor++
+					} else {
+						sameCursor = 0
+					}
+					if dupePages%25 == 0 {
+						fmt.Fprintf(os.Stderr, "explore: skipped %d duplicate pages, paging\n", dupePages)
+					}
+					ended := !pageHasMore(body) || len(vids) == 0
+					stuck := sameCursor >= 8
+					if canFresh(lastFresh) && (ended || stuck) {
+						fmt.Fprintln(os.Stderr, "explore stalled; fetching a new feed")
+						fresh = true
+						cursor = ""
+						dupePages = 0
+						sameCursor = 0
+						backoff = 2 * time.Second
+					}
+				}
+				if cur != "" {
+					prevCur = cur
 				}
 			}
 		}
 		if savePin != nil && *savePin {
 			saveSession(sessPath, sess)
 		}
+		if !fresh {
+			if c := pageCursor(body); c != "" {
+				cursor = c
+			}
+		}
 		page++
 
-		wait := 400 * time.Millisecond
+		wait := 500 * time.Millisecond
 		if backoff > 0 {
 			wait = backoff
 			backoff = 0
@@ -77,9 +116,15 @@ func stream(ctx context.Context, first []byte, next func() ([]byte, error), pars
 		case <-time.After(wait):
 		}
 
+		wantFresh := fresh
 		var err error
 		for {
-			body, err = next()
+			body, err = next(cursor, fresh)
+			if wantFresh {
+				lastFresh = time.Now()
+			}
+			fresh = false
+			wantFresh = false
 			if err == nil && len(body) > 0 && !bytes.Contains(body, []byte("bdturing-verify")) {
 				backoff = 0
 				break
@@ -101,4 +146,8 @@ func stream(ctx context.Context, first []byte, next func() ([]byte, error), pars
 			}
 		}
 	}
+}
+
+func canFresh(lastFresh time.Time) bool {
+	return lastFresh.IsZero() || time.Since(lastFresh) >= exploreStall
 }

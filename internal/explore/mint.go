@@ -100,7 +100,7 @@ func mintSession(parent context.Context) (*pinnedSession, error) {
 	if err != nil {
 		return nil, fmt.Errorf("mint comedy: %w", err)
 	}
-	if webTokenDead(body, nil) {
+	if webTokenDead(body, nil) || webEmpty(body) {
 		return nil, fmt.Errorf("mint: web comedy still empty (bytes=%d captcha=%v)", len(body), strings.Contains(string(body), "bdturing"))
 	}
 

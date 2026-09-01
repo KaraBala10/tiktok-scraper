@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func fetchWeb(categoryType, count int, p regionProfile, sess *pinnedSession) ([]byte, http.Header, error) {
+func fetchWeb(categoryType, count int, p regionProfile, sess *pinnedSession, cursor string, fresh bool) ([]byte, http.Header, error) {
 	code := p.Code
 	q := url.Values{}
 	q.Set("aid", "1988")
@@ -20,7 +20,11 @@ func fetchWeb(categoryType, count int, p regionProfile, sess *pinnedSession) ([]
 	q.Set("device_platform", "web_pc")
 	q.Set("categoryType", strconv.Itoa(categoryType))
 	q.Set("count", strconv.Itoa(count))
-	q.Set("pullType", "2")
+	if fresh {
+		q.Set("pullType", "1")
+	} else {
+		q.Set("pullType", "2")
+	}
 	q.Set("cookie_enabled", "true")
 	q.Set("os", "linux")
 	q.Set("region", code)
@@ -30,6 +34,9 @@ func fetchWeb(categoryType, count int, p regionProfile, sess *pinnedSession) ([]
 	q.Set("language", p.Language)
 	q.Set("app_language", p.Language)
 	q.Set("webcast_language", p.Language)
+	if cursor != "" && !fresh {
+		q.Set("cursor", cursor)
+	}
 	if sess != nil && sess.DeviceID == "" {
 		ids := generateWebIDs()
 		sess.DeviceID = ids.DeviceID
@@ -64,27 +71,42 @@ func fetchWeb(categoryType, count int, p regionProfile, sess *pinnedSession) ([]
 	return raw, hdr, nil
 }
 
-func fetchWebComedy(categoryType, count int, p regionProfile, sess *pinnedSession) ([]byte, error) {
-	body, hdr, err := fetchWeb(categoryType, count, p, sess)
+func fetchWebComedy(categoryType, count int, p regionProfile, sess *pinnedSession, cursor string, fresh bool) ([]byte, error) {
+	body, hdr, err := fetchWeb(categoryType, count, p, sess, cursor, fresh)
 	if err != nil {
 		return nil, err
 	}
 	if next := hdr.Get("x-ms-token"); next != "" {
 		sess.Cookie = mergeMsToken(sess.Cookie, next)
-		if len(body) == 0 || webEmpty(body) {
-			body, hdr, err = fetchWeb(categoryType, count, p, sess)
-			if err != nil {
-				return nil, err
-			}
-			if n := hdr.Get("x-ms-token"); n != "" {
-				sess.Cookie = mergeMsToken(sess.Cookie, n)
-			}
+	}
+	if len(body) == 0 || webEmpty(body) {
+		body, hdr, err = fetchWeb(categoryType, count, p, sess, cursor, fresh)
+		if err != nil {
+			return nil, err
+		}
+		if n := hdr.Get("x-ms-token"); n != "" {
+			sess.Cookie = mergeMsToken(sess.Cookie, n)
 		}
 	}
 	if !webTokenDead(body, nil) {
 		sess.CapturedAt = time.Now().UTC().Format(time.RFC3339)
 	}
 	return body, nil
+}
+
+func pageCursor(body []byte) string {
+	var page struct {
+		Cursor json.RawMessage `json:"cursor"`
+	}
+	if json.Unmarshal(body, &page) != nil || len(page.Cursor) == 0 || string(page.Cursor) == "null" {
+		return ""
+	}
+	s := strings.TrimSpace(string(page.Cursor))
+	s = strings.Trim(s, `"`)
+	if s == "" || s == "0" {
+		return ""
+	}
+	return s
 }
 
 func parseWeb(body []byte, cat int, p regionProfile) ([]video, string, error) {
@@ -136,12 +158,42 @@ func webTokenDead(body []byte, err error) bool {
 	if json.Unmarshal(body, &page) != nil {
 		return true
 	}
-	if page.StatusCode != 0 {
+	switch page.StatusCode {
+	case 0:
+		return false
+	case 10000, 100001:
 		return true
+	default:
+		return false
 	}
-	return len(page.ItemList) == 0
 }
 
 func webEmpty(body []byte) bool {
-	return webTokenDead(body, nil)
+	if len(body) == 0 || bytes.Contains(body, []byte("bdturing-verify")) {
+		return true
+	}
+	var page webResp
+	if json.Unmarshal(body, &page) != nil {
+		return true
+	}
+	return page.StatusCode != 0 || len(page.ItemList) == 0
+}
+
+func webLoginDead(body []byte) bool {
+	if len(body) == 0 || bytes.Contains(body, []byte("bdturing-verify")) {
+		return false
+	}
+	var page webResp
+	if json.Unmarshal(body, &page) != nil {
+		return false
+	}
+	return page.StatusCode == 10000 || page.StatusCode == 100001
+}
+
+func pageHasMore(body []byte) bool {
+	var page webResp
+	if json.Unmarshal(body, &page) != nil {
+		return true
+	}
+	return page.HasMore
 }

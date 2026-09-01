@@ -14,6 +14,8 @@ and version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - Explore session region now follows the current IP instead of printing `?` on mint and then saving the `-region` default (`KW`)
 - Look up the IP country with ip-api; Cloudflare `loc` mislabels some VPN exits (e.g. Kuwait as `FR`)
 - Treat HTTP 451 as a country ban: keep the saved session and do not remint; an `msToken` cannot bypass TikTok geo-blocks
+- Explore paginates with the API `cursor` instead of repeating the same first page
+- After the comedy feed ends, mint a new session and keep paging past already-seen videos; do not remint on empty/rate-limit pages
 
 ## [0.3.0] - 2026-09-01
 
